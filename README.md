@@ -2,7 +2,7 @@
 
 After the cache settings are activated the fact cache is being written to **fact_cache/** subdirectory
 
-The original Ansible's script is [here](https://raw.githubusercontent.com/ansible/ansible/devel/contrib/inventory/ovirt4.py)
+The original Ansible's script is [here](https://github.com/ansible/ansible/blob/devel/contrib/inventory/ovirt4.py)
 
 ## Ansible fact caching
 
