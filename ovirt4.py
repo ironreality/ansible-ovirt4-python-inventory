@@ -62,7 +62,9 @@ Author: Ondra Machacek (@machacekondra)
 import argparse
 import os
 import sys
+import logging
 
+from time import time
 from collections import defaultdict
 
 try:
@@ -106,9 +108,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def create_connection():
+def parse_config():
     """
-    Create a connection to oVirt engine API.
+    Read config file parameters if any
     """
     # Get the path of the configuration file, by default use
     # 'ovirt.ini' file in script directory:
@@ -125,12 +127,19 @@ def create_connection():
             'ovirt_username': os.environ.get('OVIRT_USERNAME'),
             'ovirt_password': os.environ.get('OVIRT_PASSWORD'),
             'ovirt_ca_file': os.environ.get('OVIRT_CAFILE'),
+            'ovirt_cache': os.environ.get('OVIRT_CACHE'),
+            'ovirt_cache_path': os.environ.get('OVIRT_CACHE_PATH') or '/tmp/ovirt_inventory.cache',
+            'ovirt_cache_max_age': os.environ.get('OVIRT_CACHE_MAX_AGE') or '3600',
         }
     )
-    if not config.has_section('ovirt'):
-        config.add_section('ovirt')
     config.read(config_path)
+    return config
 
+
+def create_connection(config):
+    """
+    Create a connection to oVirt engine API.
+    """
     # Create a connection with options defined in ini file:
     return sdk.Connection(
         url=config.get('ovirt', 'ovirt_url'),
@@ -239,21 +248,66 @@ def get_data(connection, vm_name=None):
 
     return data
 
+def is_cache_valid(cache_path, cache_max_age):
+    """ Determines if the cache files have expired, or if it is still valid """
+
+    logging.info("Checking cache file " + cache_path + "...")
+    if os.path.isfile(cache_path):
+        mod_time = os.path.getmtime(cache_path)
+        current_time = time()
+        logging.info("modification time is: " + str(mod_time))
+        logging.info("current time is: " + str(current_time))
+        if (mod_time + float(cache_max_age)) > current_time:
+            logging.info("Cache is valid.")
+            return True
+
+    logging.info("Cache is invalid.")
+    return False
+
+
+def load_data_from_cache(cache_path, pretty):
+    logging.info("load_data_from_cache() stub")
+    with open(cache_path, 'r') as outfile:
+        parsed = json.load(outfile)
+        print(json.dumps(parsed, sort_keys=pretty, indent=pretty*2))
+    outfile.close()
+
+
+def update_cache(data, cache_path):
+    logging.info("update_cache() stub")
+    with open(cache_path, 'w') as outfile:
+        json.dump(data, outfile)
+    outfile.close()
+
 
 def main():
     args = parse_args()
-    connection = create_connection()
+    pretty = args.pretty
+    config = parse_config()
 
-    print(
-        json.dumps(
-            obj=get_data(
-                connection=connection,
-                vm_name=args.host,
-            ),
-            sort_keys=args.pretty,
-            indent=args.pretty * 2,
-        )
-    )
+    usecache = config.get('ovirt', 'ovirt_cache')
+    if usecache and not args.host:
+
+        logging.info('Checking cache...')
+        cache_path = config.get('ovirt', 'ovirt_cache_path')
+        cache_max_age = config.get('ovirt', 'ovirt_cache_max_age')
+
+        if is_cache_valid(cache_path, cache_max_age):
+            logging.info('Cache is valid, loading data from cache...')
+            load_data_from_cache(cache_path, pretty)
+            quit()
+        else:
+            logging.info('Cache is outdated, get fresh data...')
+            connection = create_connection(config)
+            data = get_data(connection)
+            update_cache(data, cache_path)
+            load_data_from_cache(cache_path, pretty)
+            quit()
+    else:
+        logging.info('Won\'t use cache now. Loading fresh data...')
+        connection = create_connection(config)
+        data = get_data(connection, vm_name=args.host)
+        print(json.dumps(data, sort_keys=args.pretty, indent=args.pretty*2))
 
 
 if __name__ == '__main__':
